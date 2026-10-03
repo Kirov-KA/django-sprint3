@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 from exceptions import (
     EndpointUnavailableError,
     InvalidResponseError,
+    MissingKeyError,
+    SendMessageError,
     UnexpectedStatusError,
 )
 
@@ -61,7 +63,8 @@ def check_tokens():
 def send_message(vk, message):
     """Отправляет сообщение в VK-чат.
 
-    Возвращает True при успешной отправке, иначе False.
+    При сбое отправки возбуждает SendMessageError.
+    Успешная отправка логируется на уровне DEBUG.
     """
     try:
         vk.messages.send(
@@ -69,11 +72,11 @@ def send_message(vk, message):
             message=message,
             random_id=int(time.time() * 1000),
         )
-    except Exception as error:
-        logger.error('Сбой при отправке сообщения в VK: %s', error)
-        return False
+    except (requests.RequestException, vk_api.exceptions.VkAPIError) as error:
+        raise SendMessageError(
+            f'Сбой при отправке сообщения в VK: {error}'
+        ) from error
     logger.debug('Бот отправил сообщение "%s"', message)
-    return True
 
 
 def get_api_answer(timestamp):
@@ -116,25 +119,27 @@ def check_response(response):
     Возвращает список домашних работ.
     """
     if not isinstance(response, dict):
+        response_type = type(response)
         raise TypeError(
-            f'Ответ API не является словарём, получен {type(response)}.'
+            f'Ответ API не является словарём, получен {response_type}.'
         )
 
     if 'homeworks' not in response:
-        raise InvalidResponseError(
+        raise MissingKeyError(
             'В ответе API отсутствует ключ "homeworks".'
         )
 
     if 'current_date' not in response:
-        raise InvalidResponseError(
+        raise MissingKeyError(
             'В ответе API отсутствует ключ "current_date".'
         )
 
     homeworks = response['homeworks']
     if not isinstance(homeworks, list):
+        homeworks_type = type(homeworks)
         raise TypeError(
             'Ключ "homeworks" в ответе API не является списком, '
-            f'получен {type(homeworks)}.'
+            f'получен {homeworks_type}.'
         )
 
     return homeworks
@@ -146,12 +151,12 @@ def parse_status(homework):
     Возвращает строку с вердиктом из словаря HOMEWORK_VERDICTS.
     """
     if 'homework_name' not in homework:
-        raise InvalidResponseError(
+        raise MissingKeyError(
             'В информации о домашней работе отсутствует ключ "homework_name".'
         )
 
     if 'status' not in homework:
-        raise InvalidResponseError(
+        raise MissingKeyError(
             'В информации о домашней работе отсутствует ключ "status".'
         )
 
@@ -194,16 +199,22 @@ def main():
             else:
                 for homework in homeworks:
                     message = parse_status(homework)
-                    send_message(vk, message)
+                    try:
+                        send_message(vk, message)
+                    except SendMessageError as error:
+                        logger.exception(error)
 
             timestamp = api_answer.get('current_date', timestamp)
             last_error_message = None
 
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
-            logger.error(message)
+            logger.exception(message)
             if str(error) != last_error_message:
-                send_message(vk, message)
+                try:
+                    send_message(vk, message)
+                except SendMessageError as send_error:
+                    logger.exception(send_error)
                 last_error_message = str(error)
 
         finally:

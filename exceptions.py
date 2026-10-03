@@ -9,9 +9,17 @@ class EndpointUnavailableError(PracticumAPIError):
     """Эндпоинт недоступен (сетевые ошибки, 5xx, 404 и т.п.)."""
 
 
-class InvalidResponseError(PracticumAPIError):
+class InvalidResponseError(ValueError):
     """Ответ API не соответствует ожидаемой структуре."""
+
+
+class MissingKeyError(InvalidResponseError, KeyError):
+    """В ответе API отсутствует ожидаемый ключ."""
 
 
 class UnexpectedStatusError(PracticumAPIError):
     """Обнаружен неизвестный статус домашней работы."""
+
+
+class SendMessageError(Exception):
+    """Сбой при отправке сообщения в VK."""
