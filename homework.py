@@ -172,6 +172,35 @@ def parse_status(homework):
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
 
+def process_homeworks(vk, homeworks):
+    """Обрабатывает список домашних работ и отправляет сообщения в VK."""
+    if not homeworks:
+        logger.debug('В ответе API нет новых статусов.')
+        return
+    for homework in homeworks:
+        message = parse_status(homework)
+        try:
+            send_message(vk, message)
+        except SendMessageError as error:
+            logger.exception(error)
+
+
+def handle_error(vk, error, last_error_message):
+    """Логирует ошибку и при необходимости отправляет её в VK.
+
+    Возвращает текст последней обработанной ошибки.
+    """
+    message = f'Сбой в работе программы: {error}'
+    logger.exception(message)
+    if str(error) == last_error_message:
+        return last_error_message
+    try:
+        send_message(vk, message)
+    except SendMessageError as send_error:
+        logger.exception(send_error)
+    return str(error)
+
+
 def main():
     """Основная логика работы бота."""
     missing_tokens = check_tokens()
@@ -193,30 +222,13 @@ def main():
         try:
             api_answer = get_api_answer(timestamp)
             homeworks = check_response(api_answer)
-
-            if not homeworks:
-                logger.debug('В ответе API нет новых статусов.')
-            else:
-                for homework in homeworks:
-                    message = parse_status(homework)
-                    try:
-                        send_message(vk, message)
-                    except SendMessageError as error:
-                        logger.exception(error)
-
+            process_homeworks(vk, homeworks)
             timestamp = api_answer.get('current_date', timestamp)
             last_error_message = None
-
         except Exception as error:
-            message = f'Сбой в работе программы: {error}'
-            logger.exception(message)
-            if str(error) != last_error_message:
-                try:
-                    send_message(vk, message)
-                except SendMessageError as send_error:
-                    logger.exception(send_error)
-                last_error_message = str(error)
-
+            last_error_message = handle_error(
+                vk, error, last_error_message
+            )
         finally:
             time.sleep(RETRY_PERIOD_IN_SECONDS)
 
